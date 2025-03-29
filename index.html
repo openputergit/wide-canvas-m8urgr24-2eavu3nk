@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mood Mate - Emotion Recognition App</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-detection"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection"></script>
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: #f0f9ff;
+        }
+        .canvas-wrapper {
+            position: relative;
+        }
+        #overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="min-h-screen p-4 md:p-8">
+        <div class="max-w-4xl mx-auto">
+            <header class="text-center mb-8">
+                <h1 class="text-3xl md:text-4xl font-bold text-blue-600 mb-2">Mood Mate</h1>
+                <p class="text-gray-600">Your AI-powered emotional wellness companion</p>
+            </header>
+
+            <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+                <div class="canvas-wrapper mx-auto max-w-2xl relative">
+                    <video id="video" class="w-full rounded-lg" autoplay muted></video>
+                    <canvas id="overlay" class="w-full rounded-lg"></canvas>
+                </div>
+                
+                <div class="mt-6 text-center">
+                    <button id="startButton" class="bg-blue-500 text-white px-6 py-2 rounded-full hover:bg-blue-600 transition-colors">
+                        <i class="bi bi-camera-video"></i> Start Camera
+                    </button>
+                </div>
+            </div>
+
+            <div id="moodResults" class="bg-white rounded-lg shadow-lg p-6 mb-8 hidden">
+                <h2 class="text-xl font-semibold mb-4">Current Mood: <span id="currentMood" class="text-blue-500"></span></h2>
+                <div id="suggestions" class="space-y-4">
+                    <!-- Suggestions will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const overlay = document.getElementById('overlay');
+        const ctx = overlay.getContext('2d');
+        const startButton = document.getElementById('startButton');
+        const moodResults = document.getElementById('moodResults');
+        let isRunning = false;
+
+        // Activity suggestions based on mood
+        const moodSuggestions = {
+            sad: [
+                { icon: 'bi-film', text: 'Watch a feel-good movie' },
+                { icon: 'bi-people', text: 'Call a friend for a chat' },
+                { icon: 'bi-controller', text: 'Play your favorite game' },
+                { icon: 'bi-music-note', text: 'Listen to upbeat music' }
+            ],
+            happy: [
+                { icon: 'bi-journal-text', text: 'Journal about your great day' },
+                { icon: 'bi-camera', text: 'Take some fun selfies' },
+                { icon: 'bi-share', text: 'Share your joy with others' }
+            ],
+            neutral: [
+                { icon: 'bi-book', text: 'Read a book' },
+                { icon: 'bi-tree', text: 'Take a nature walk' },
+                { icon: 'bi-palette', text: 'Try something creative' }
+            ]
+        };
+
+        async function setupCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                video.addEventListener('play', () => {
+                    overlay.width = video.videoWidth;
+                    overlay.height = video.videoHeight;
+                    if (!isRunning) {
+                        detectEmotions();
+                    }
+                });
+            } catch (error) {
+                console.error('Error accessing camera:', error);
+                alert('Please enable camera access to use this application');
+            }
+        }
+
+        async function loadModels() {
+            try {
+                await faceapi.nets.tinyFaceDetector.load('/');
+                await faceapi.nets.faceLandmark68Net.load('/');
+                await faceapi.nets.faceExpressionNet.load('/');
+            } catch (error) {
+                console.error('Error loading models:', error);
+            }
+        }
+
+        function updateSuggestions(mood) {
+            const suggestionsDiv = document.getElementById('suggestions');
+            suggestionsDiv.innerHTML = '';
+            
+            const suggestions = moodSuggestions[mood.toLowerCase()] || moodSuggestions.neutral;
+            suggestions.forEach(suggestion => {
+                const div = document.createElement('div');
+                div.className = 'flex items-center p-3 bg-blue-50 rounded-lg';
+                div.innerHTML = `
+                    <i class="bi ${suggestion.icon} text-2xl text-blue-500 mr-3"></i>
+                    <span class="text-gray-700">${suggestion.text}</span>
+                `;
+                suggestionsDiv.appendChild(div);
+            });
+        }
+
+        async function detectEmotions() {
+            isRunning = true;
+            const detection = await faceapi.detectSingleFace(
+                video, 
+                new faceapi.TinyFaceDetectorOptions()
+            ).withFaceLandmarks().withFaceExpressions();
+
+            if (detection) {
+                ctx.clearRect(0, 0, overlay.width, overlay.height);
+                
+                // Draw face detection box
+                ctx.strokeStyle = '#30cfd0';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(
+                    detection.detection.box.x,
+                    detection.detection.box.y,
+                    detection.detection.box.width,
+                    detection.detection.box.height
+                );
+
+                // Get dominant emotion
+                const emotions = detection.expressions;
+                const dominantEmotion = Object.keys(emotions).reduce((a, b) => 
+                    emotions[a] > emotions[b] ? a : b
+                );
+
+                // Update UI
+                document.getElementById('currentMood').textContent = dominantEmotion.charAt(0).toUpperCase() + dominantEmotion.slice(1);
+                moodResults.classList.remove('hidden');
+                
+                // Update suggestions based on mood
+                if (dominantEmotion === 'sad' || dominantEmotion === 'angry' || dominantEmotion === 'fearful') {
+                    updateSuggestions('sad');
+                } else if (dominantEmotion === 'happy' || dominantEmotion === 'surprised') {
+                    updateSuggestions('happy');
+                } else {
+                    updateSuggestions('neutral');
+                }
+            }
+
+            requestAnimationFrame(detectEmotions);
+        }
+
+        startButton.addEventListener('click', async () => {
+            await loadModels();
+            await setupCamera();
+            startButton.disabled = true;
+            startButton.innerHTML = '<i class="bi bi-camera-video-fill"></i> Camera Active';
+            startButton.classList.add('bg-green-500');
+        });
+
+        // Handle visibility change
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                isRunning = false;
+            } else if (video.srcObject) {
+                detectEmotions();
+            }
+        });
+    </script>
+<script>document.body.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); return }, { passive: false })</script>
+	</body>
+</html>
